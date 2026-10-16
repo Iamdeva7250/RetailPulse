@@ -1,3 +1,4 @@
+
 name: RetailPulse CI
 
 on:
@@ -7,8 +8,12 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  check:
+  syntax:
+    name: Python Syntax Check
     runs-on: ubuntu-latest
 
     steps:
@@ -22,3 +27,28 @@ jobs:
 
       - name: Check Python syntax
         run: python -m compileall -q api tests scripts src dashboard
+
+  dependencies:
+    name: Verify Test Dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest httpx pandas fastapi python-dotenv SQLAlchemy "psycopg[binary]"
+
+      - name: Verify test tools
+        run: |
+          python -c "import pandas, fastapi, httpx, sqlalchemy, psycopg"
+          python -m pytest --version
