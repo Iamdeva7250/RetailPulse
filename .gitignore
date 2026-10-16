@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data
+data/raw/*
+data/processed/*
+data/external/*
+
+# Models
+models/*.pkl
+models/*.joblib
+models/*.h5
+models/*.keras
+
+# MLflow
+mlruns/
+
+# Streamlit
+.streamlit/
+
+# Environment variables
+.env
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+# Local SQLite database
+data/retailpulse.db
+
+# Temporary dashboard backups and unused variant
+dashboard/*.bak
+dashboard/app_new.py

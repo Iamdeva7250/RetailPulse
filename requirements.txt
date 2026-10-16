@@ -1,0 +1,27 @@
+pandas
+numpy
+openpyxl
+jupyter
+ipykernel
+matplotlib
+seaborn
+scikit-learn
+scipy
+statsmodels
+prophet
+xgboost
+joblib
+streamlit
+plotly
+fastapi
+uvicorn
+pydantic
+mlflow
+pyyaml
+python-multipart
+# Testing and database dependencies
+pytest
+httpx
+python-dotenv
+SQLAlchemy
+psycopg[binary]

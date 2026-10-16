@@ -1,0 +1,25 @@
+project:
+  name: RetailPulse
+  version: "1.0"
+  description: "AI-Powered Customer Analytics and Demand Forecasting Platform"
+
+data:
+  raw_path: "data/raw/online_retail_II.xlsx"
+  processed_path: "data/processed/retail_clean.csv"
+
+models:
+  churn_model: "models/churn_model.pkl"
+  segmentation_model: "models/customer_segmentation.pkl"
+  forecast_model: "models/forecast_model.pkl"
+
+forecast:
+  horizon_days: 90
+
+inventory:
+  lead_time_days: 7
+  service_level_z: 1.65
+
+churn:
+  inactivity_days: 90
+
+random_state: 42

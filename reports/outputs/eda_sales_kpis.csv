@@ -1,0 +1,12 @@
+Metric,Value
+Rows in source dataset,779425.0
+Rows after excluding cancelled records,779425.0
+Cancelled rows,0.0
+Total revenue (net of flagged cancellations),17374804.27
+Net quantity,10513952.0
+Distinct invoices,36969.0
+Distinct identified customers,5878.0
+Distinct products,4631.0
+Distinct countries,41.0
+Negative quantity rows,0.0
+Negative revenue rows,0.0

@@ -1,0 +1,21 @@
+{
+    "raw_rows": 1067371,
+    "clean_rows": 1033036,
+    "sales_rows": 779425,
+    "raw_columns": 8,
+    "clean_columns": 9,
+    "duplicate_rows_raw": 34335,
+    "duplicate_rows_clean": 0,
+    "missing_customer_id_raw": 243007,
+    "missing_customer_id_sales": 0,
+    "cancelled_rows": 19494,
+    "negative_quantity_rows": 22950,
+    "zero_quantity_rows": 0,
+    "zero_price_rows": 6202,
+    "unique_customers": 5878,
+    "unique_products": 4631,
+    "unique_invoices": 36969,
+    "unique_countries": 41,
+    "min_date": "2009-12-01 07:45:00",
+    "max_date": "2011-12-09 12:50:00"
+}

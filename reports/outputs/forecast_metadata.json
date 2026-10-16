@@ -1,0 +1,15 @@
+{
+    "target": "DailyRevenue",
+    "model": "Prophet",
+    "forecast_horizon_days": 90,
+    "train_start": "2009-12-01 00:00:00",
+    "train_end": "2011-09-10 00:00:00",
+    "test_start": "2011-09-11 00:00:00",
+    "test_end": "2011-12-09 00:00:00",
+    "baseline_mae": 22699.27935555555,
+    "baseline_rmse": 30016.31134129045,
+    "prophet_mae": 12916.034714114801,
+    "prophet_rmse": 21806.609637684123,
+    "prophet_mape": 29.70493686825746,
+    "expected_90_day_revenue": 2130962.9990048357
+}

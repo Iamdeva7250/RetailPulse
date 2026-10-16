@@ -1,0 +1,19 @@
+{
+    "rows": 1067371,
+    "columns": 8,
+    "column_names": [
+        "Invoice",
+        "StockCode",
+        "Description",
+        "Quantity",
+        "InvoiceDate",
+        "Price",
+        "Customer ID",
+        "Country"
+    ],
+    "duplicate_rows": 34335,
+    "missing_customer_id": 243007,
+    "unique_customers": 5942,
+    "unique_products": 5305,
+    "unique_countries": 43
+}

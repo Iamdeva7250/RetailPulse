@@ -1,0 +1,13 @@
+{
+    "dataset_file": "feature_engineered_sales.csv",
+    "rows": 779425,
+    "columns": 48,
+    "duplicate_rows": 0,
+    "missing_cells": 0,
+    "revenue_column_used": "Revenue",
+    "date_column_used": "Date",
+    "invoice_column_used": "Invoice",
+    "customer_column_used": "Customer ID",
+    "figures_folder": "reports\\figures",
+    "outputs_folder": "reports\\outputs"
+}
