@@ -663,6 +663,147 @@ def analytics_summary():
 # 9. REVENUE FORECAST
 # ============================================================
 
+
+@app.get("/analytics/customers", tags=["Analytics"])
+def customer_analytics(
+    limit: int = Query(default=500, ge=1, le=500),
+):
+    """Aggregate full-dataset customer metrics inside PostgreSQL."""
+    engine = get_database_engine()
+
+    if engine is None:
+        raise HTTPException(
+            status_code=503,
+            detail="DATABASE_URL is not configured.",
+        )
+
+    try:
+        columns = database_columns()
+
+        customer_col = find_database_column(
+            columns, ["Customer ID", "CustomerID", "Customer_ID"]
+        )
+        invoice_col = find_database_column(
+            columns, ["Invoice", "InvoiceNo", "InvoiceID", "OrderID"]
+        )
+        date_col = find_database_column(
+            columns, ["InvoiceDate", "Invoice Date", "OrderDate", "Date"]
+        )
+        revenue_col = find_database_column(
+            columns, ["Revenue", "TotalRevenue", "Sales", "Amount"]
+        )
+
+        missing = [
+            name for name, value in [
+                ("customer ID", customer_col),
+                ("invoice ID", invoice_col),
+                ("invoice date", date_col),
+                ("revenue", revenue_col),
+            ] if value is None
+        ]
+
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Customer analytics requires these columns: "
+                    + ", ".join(missing)
+                ),
+            )
+
+        table = (
+            f"{quote_column(DB_SCHEMA)}."
+            f"{quote_column(DB_TABLE)}"
+        )
+        customer = quote_column(customer_col)
+        invoice = quote_column(invoice_col)
+        invoice_date = quote_column(date_col)
+        revenue = quote_column(revenue_col)
+
+        # Both queries aggregate in PostgreSQL. Only the requested
+        # customer preview is transferred to the dashboard.
+        grouped_cte = f"""
+            SELECT
+                {customer} AS customer_id,
+                MAX({invoice_date}) AS last_purchase_date,
+                COUNT(DISTINCT {invoice}) AS frequency,
+                SUM(COALESCE({revenue}, 0)) AS monetary,
+                COUNT(*) AS transaction_rows
+            FROM {table}
+            WHERE {customer} IS NOT NULL
+            GROUP BY {customer}
+        """
+
+        summary_query = text(f"""
+            WITH customer_totals AS ({grouped_cte})
+            SELECT
+                COUNT(*) AS total_customers,
+                COALESCE(SUM(monetary), 0) AS total_customer_revenue,
+                COALESCE(AVG(monetary), 0) AS average_customer_revenue
+            FROM customer_totals
+        """)
+
+        preview_query = text(f"""
+            WITH bounds AS (
+                SELECT MAX({invoice_date}) AS max_date
+                FROM {table}
+            ),
+            customer_totals AS ({grouped_cte})
+            SELECT
+                c.customer_id AS "CustomerID",
+                c.last_purchase_date AS "LastPurchaseDate",
+                (CAST(b.max_date AS DATE)
+                 - CAST(c.last_purchase_date AS DATE)) AS "Recency",
+                c.frequency AS "Frequency",
+                c.monetary AS "Monetary",
+                c.transaction_rows AS "TransactionRows"
+            FROM customer_totals c
+            CROSS JOIN bounds b
+            ORDER BY c.monetary DESC
+            LIMIT :limit
+        """)
+
+        with engine.connect() as connection:
+            summary_row = connection.execute(
+                summary_query
+            ).mappings().one()
+
+            result = connection.execute(
+                preview_query,
+                {"limit": limit},
+            )
+            records = [
+                {
+                    str(key): clean_value(value)
+                    for key, value in row.items()
+                }
+                for row in result.mappings().all()
+            ]
+
+        return {
+            "source": "postgresql",
+            "dataset": DB_TABLE,
+            "total_customers": int(summary_row["total_customers"]),
+            "total_customer_revenue": clean_value(
+                summary_row["total_customer_revenue"]
+            ),
+            "average_customer_revenue": clean_value(
+                summary_row["average_customer_revenue"]
+            ),
+            "preview_limit": limit,
+            "returned_customers": len(records),
+            "data": records,
+        }
+
+    except HTTPException:
+        raise
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="PostgreSQL customer analytics are temporarily unavailable.",
+        ) from exc
+
+
 @app.get("/forecast/revenue", tags=["Forecasting"])
 def revenue_forecast(
     limit: int = Query(default=90, ge=1, le=500),
