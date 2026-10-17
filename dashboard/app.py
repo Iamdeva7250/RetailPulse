@@ -1,5 +1,7 @@
 
 import os
+import json
+import urllib.request
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +29,29 @@ PROJECT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_DIR / "data" / "processed"
 
 load_dotenv(PROJECT_DIR / ".env")
+
+# ============================================================
+# LIVE API CLIENT
+# ============================================================
+
+API_BASE_URL = os.getenv(
+    "RETAILPULSE_API_URL",
+    "https://retailpulse-api-mo29.onrender.com",
+).rstrip("/")
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_live_api_json(endpoint):
+    """Fetch JSON from the RetailPulse API without database credentials."""
+    request = urllib.request.Request(
+        f"{API_BASE_URL}{endpoint}",
+        headers={"Accept": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+
 
 
 @st.cache_resource
@@ -508,6 +533,73 @@ tab_forecasting, tab_inventory, tab_health = st.tabs(
 
 with tab_overview:
     st.header("Business Overview")
+
+    # Live data comes from the deployed API and PostgreSQL database.
+    st.subheader("Live API & PostgreSQL Data")
+
+    try:
+        live_health = get_live_api_json("/health")
+        live_summary = get_live_api_json("/analytics/summary")
+
+        if (
+            live_health.get("status") == "healthy"
+            and live_health.get("database_status") == "connected"
+        ):
+            st.success("Live API is healthy and PostgreSQL is connected.")
+        else:
+            st.warning(
+                "The API responded, but its health or database status "
+                "needs attention."
+            )
+
+        metric_columns = st.columns(5)
+        metric_columns[0].metric(
+            "Total Revenue",
+            f"{float(live_summary.get('total_revenue', 0)):,.2f}",
+        )
+        metric_columns[1].metric(
+            "Quantity Sold",
+            f"{float(live_summary.get('total_quantity', 0)):,.0f}",
+        )
+        metric_columns[2].metric(
+            "Customers",
+            f"{int(live_summary.get('unique_customers', 0)):,}",
+        )
+        metric_columns[3].metric(
+            "Invoices",
+            f"{int(live_summary.get('unique_invoices', 0)):,}",
+        )
+        metric_columns[4].metric(
+            "Products",
+            f"{int(live_summary.get('unique_products', 0)):,}",
+        )
+
+        st.caption(
+            f"Source: {live_summary.get('source', 'unknown')} | "
+            f"Dataset: {live_summary.get('dataset_used', 'unknown')} | "
+            f"Rows: {int(live_summary.get('row_count', 0)):,} | "
+            f"Columns: {int(live_summary.get('column_count', 0))}"
+        )
+
+        with st.expander("Preview live sales records", expanded=False):
+            preview = get_live_api_json(
+                "/datasets/feature_engineered_sales?limit=10"
+            )
+            preview_df = pd.DataFrame(preview.get("data", []))
+
+            if not preview_df.empty:
+                st.dataframe(preview_df, use_container_width=True)
+            else:
+                st.info("The API returned no preview rows.")
+
+    except Exception:
+        st.error(
+            "Could not load live API data. Check the API URL and "
+            "the deployed API health endpoint, then refresh this page."
+        )
+
+    st.markdown("---")
+
     st.write(
         "A high-level view of revenue, transactions, customers, "
         "products, churn predictions, and inventory risk."
@@ -642,9 +734,12 @@ with tab_overview:
 with tab_sales:
     st.header("Sales Analytics")
 
+    LIVE_SALES_OPTION = "Live PostgreSQL (API)"
+
     sales_source = st.selectbox(
         "Choose sales dataset",
         [
+            LIVE_SALES_OPTION,
             FILES["engineered_sales"],
             FILES["retail_sales"],
             FILES["clean_sales"],
@@ -653,7 +748,29 @@ with tab_sales:
         ],
         key="sales_source_select",
     )
-    sales_df = get_dataset(sales_source)
+
+    live_sales_summary = None
+
+    if sales_source == LIVE_SALES_OPTION:
+        try:
+            live_sales_summary = get_live_api_json(
+                "/analytics/summary"
+            )
+            live_preview = get_live_api_json(
+                "/datasets/feature_engineered_sales?limit=500"
+            )
+            sales_df = pd.DataFrame(
+                live_preview.get("data", [])
+            )
+        except Exception as exc:
+            st.error(
+                "Could not load live sales data from the API. "
+                "Check the API health endpoint and refresh. "
+                f"Details: {exc}"
+            )
+            sales_df = None
+    else:
+        sales_df = get_dataset(sales_source)
 
     if sales_df is not None:
         revenue_col = find_revenue_column(sales_df)
@@ -685,6 +802,24 @@ with tab_sales:
             sales_df[country_col].nunique()
             if country_col else None
         )
+
+        if live_sales_summary is not None:
+            total_revenue = float(
+                live_sales_summary.get("total_revenue", 0)
+            )
+            total_quantity = float(
+                live_sales_summary.get("total_quantity", 0)
+            )
+            invoices = int(
+                live_sales_summary.get("unique_invoices", 0)
+            )
+
+            st.info(
+                "Headline metrics use the complete PostgreSQL dataset "
+                f"({int(live_sales_summary.get('row_count', 0)):,} rows). "
+                "Charts and the table below use an API preview of up "
+                "to 500 rows, so their breakdowns are not database-wide."
+            )
 
         show_metric_row([
             ("Revenue", format_number(total_revenue)),
@@ -758,9 +893,12 @@ with tab_sales:
 with tab_customers:
     st.header("Customer Analytics")
 
+    live_customer_option = "Live PostgreSQL (API)"
+
     customer_choice = st.selectbox(
         "Choose customer dataset",
         [
+            live_customer_option,
             FILES["customer_features"],
             FILES["rfm_segments"],
             FILES["rfm_summary"],
@@ -771,7 +909,30 @@ with tab_customers:
         key="customer_dataset_select",
     )
 
-    customer_df = get_dataset(customer_choice)
+    live_customer_summary = None
+
+    if customer_choice == live_customer_option:
+        try:
+            live_customer_summary = get_live_api_json(
+                "/analytics/customers?limit=500"
+            )
+            customer_df = pd.DataFrame(
+                live_customer_summary.get("data", [])
+            )
+            st.caption(
+                "Source: live PostgreSQL via RetailPulse API. "
+                "Summary metrics cover the full dataset; "
+                "charts and table use the returned customer preview."
+            )
+        except Exception as exc:
+            customer_df = None
+            st.error(
+                "Could not load live customer analytics. "
+                "Check the API health endpoint and refresh the page."
+            )
+            st.caption(f"Diagnostic: {type(exc).__name__}: {exc}")
+    else:
+        customer_df = get_dataset(customer_choice)
 
     if customer_df is not None:
         customer_id_col = find_customer_column(customer_df)
@@ -787,24 +948,60 @@ with tab_customers:
                           "CustomerRevenue"]
         )
 
-        unique_customers = (
-            customer_df[customer_id_col].nunique()
-            if customer_id_col else len(customer_df)
-        )
+        if live_customer_summary is not None:
+            show_metric_row([
+                (
+                    "Total Customers",
+                    format_integer(
+                        live_customer_summary.get("total_customers", 0)
+                    ),
+                ),
+                (
+                    "Total Customer Revenue",
+                    format_number(
+                        live_customer_summary.get(
+                            "total_customer_revenue", 0
+                        )
+                    ),
+                ),
+                (
+                    "Average Customer Revenue",
+                    format_number(
+                        live_customer_summary.get(
+                            "average_customer_revenue", 0
+                        )
+                    ),
+                ),
+                (
+                    "Preview Rows",
+                    format_integer(
+                        live_customer_summary.get("returned_customers", 0)
+                    ),
+                ),
+            ])
+        else:
+            unique_customers = (
+                customer_df[customer_id_col].nunique()
+                if customer_id_col else len(customer_df)
+            )
 
-        show_metric_row([
-            ("Rows", format_integer(len(customer_df))),
-            ("Unique Customers", format_integer(unique_customers)),
-            ("Segments / Clusters",
-             format_integer(customer_df[segment_col].nunique())
-             if segment_col else "N/A"),
-            ("Average Monetary Value",
-             format_number(
-                 pd.to_numeric(
-                     customer_df[monetary_col], errors="coerce"
-                 ).mean()
-             ) if monetary_col else "N/A"),
-        ])
+            show_metric_row([
+                ("Rows", format_integer(len(customer_df))),
+                ("Unique Customers", format_integer(unique_customers)),
+                (
+                    "Segments / Clusters",
+                    format_integer(customer_df[segment_col].nunique())
+                    if segment_col else "N/A",
+                ),
+                (
+                    "Average Monetary Value",
+                    format_number(
+                        pd.to_numeric(
+                            customer_df[monetary_col], errors="coerce"
+                        ).mean()
+                    ) if monetary_col else "N/A",
+                ),
+            ])
 
         left, right = st.columns(2)
 
@@ -818,6 +1015,12 @@ with tab_customers:
                 )
                 st.subheader("Customer Distribution")
                 st.bar_chart(segment_counts)
+            elif live_customer_summary is not None:
+                st.info(
+                    "The live dataset does not contain segment labels. "
+                    "Select an existing RFM or clustering CSV to view "
+                    "segment distributions."
+                )
             else:
                 st.info(
                     "No segment or cluster column was detected "
@@ -859,10 +1062,10 @@ with tab_customers:
             "customer_dataset_download",
         )
     else:
-        show_missing_notice(None, customer_choice)
+        if customer_choice != live_customer_option:
+            show_missing_notice(None, customer_choice)
 
 
-# ============================================================
 # TAB 4: CHURN ANALYTICS
 # ============================================================
 
