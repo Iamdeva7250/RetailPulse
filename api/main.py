@@ -884,11 +884,85 @@ def churn_predictions(
     limit: int = Query(default=50, ge=1, le=500),
 ):
     dataset_name = "customer_churn_predictions"
+    engine = get_database_engine()
 
+    # Prefer saved predictions in PostgreSQL when available.
+    if (
+        engine is not None
+        and inspect(engine).has_table(dataset_name, schema="public")
+    ):
+        summary_query = text("""
+            SELECT
+                COUNT(*) AS total_predictions,
+                COUNT(DISTINCT "Customer ID") AS unique_customers,
+                COALESCE(
+                    SUM(
+                        CASE
+                            WHEN LOWER(CAST("PredictedChurn" AS TEXT))
+                                 IN ('1', 'true', 'yes', 'churn', 'churned')
+                            THEN 1
+                            ELSE 0
+                        END
+                    ),
+                    0
+                ) AS predicted_churners,
+                AVG("ChurnProbability") AS average_churn_probability
+            FROM public.customer_churn_predictions
+        """)
+
+        preview_query = text("""
+            SELECT *
+            FROM public.customer_churn_predictions
+            ORDER BY "ChurnProbability" DESC NULLS LAST
+            LIMIT :limit
+        """)
+
+        with engine.connect() as connection:
+            summary_row = connection.execute(
+                summary_query
+            ).mappings().one()
+
+            predictions_df = pd.read_sql_query(
+                preview_query,
+                connection,
+                params={"limit": limit},
+            )
+
+        total_predictions = int(summary_row["total_predictions"] or 0)
+        predicted_churners = int(summary_row["predicted_churners"] or 0)
+
+        return {
+            "dataset_used": dataset_name,
+            "source": "postgresql",
+            "rows_available": total_predictions,
+            "columns": [str(column) for column in predictions_df.columns],
+            "summary": {
+                "total_predictions": total_predictions,
+                "unique_customers": int(
+                    summary_row["unique_customers"] or 0
+                ),
+                "predicted_churners": predicted_churners,
+                "predicted_churn_rate": (
+                    predicted_churners / total_predictions * 100
+                    if total_predictions else 0.0
+                ),
+                "average_churn_probability": (
+                    float(summary_row["average_churn_probability"])
+                    if summary_row["average_churn_probability"] is not None
+                    else None
+                ),
+            },
+            "predictions": dataframe_records(predictions_df),
+        }
+
+    # Preserve the original local CSV fallback.
     if dataset_name not in available_csv_files():
         raise HTTPException(
             status_code=404,
-            detail="Customer churn predictions were not found.",
+            detail=(
+                "Customer churn predictions were not found "
+                "in PostgreSQL or the local CSV datasets."
+            ),
         )
 
     df = load_dataset(dataset_name)
@@ -902,7 +976,6 @@ def churn_predictions(
     }
 
 
-# ============================================================
 # 12. RFM CUSTOMER SEGMENTS
 # ============================================================
 
