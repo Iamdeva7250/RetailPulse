@@ -1,9 +1,13 @@
 
+import os
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 
 
 # ============================================================
@@ -12,6 +16,11 @@ from fastapi import FastAPI, HTTPException, Query
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_DIR / "data" / "processed"
+
+DB_TABLE = "feature_engineered_sales"
+DB_SCHEMA = "public"
+
+_engine: Engine | None = None
 
 app = FastAPI(
     title="RetailPulse API",
@@ -25,7 +34,283 @@ app = FastAPI(
 
 
 # ============================================================
-# 2. DATASET HELPERS
+# 2. DATABASE HELPERS
+# ============================================================
+
+def get_database_engine() -> Engine | None:
+    """Create a PostgreSQL engine when DATABASE_URL is configured."""
+    global _engine
+
+    database_url = os.getenv("DATABASE_URL", "").strip()
+
+    if not database_url:
+        return None
+
+    if _engine is None:
+        # Support Render URLs and normalize them for psycopg 3.
+        if database_url.startswith("postgres://"):
+            database_url = database_url.replace(
+                "postgres://",
+                "postgresql+psycopg://",
+                1,
+            )
+        elif database_url.startswith("postgresql://"):
+            database_url = database_url.replace(
+                "postgresql://",
+                "postgresql+psycopg://",
+                1,
+            )
+
+        _engine = create_engine(
+            database_url,
+            pool_pre_ping=True,
+            pool_size=2,
+            max_overflow=3,
+            pool_recycle=300,
+        )
+
+    return _engine
+
+
+def database_table_exists() -> bool:
+    """Return True if the configured sales table exists."""
+    engine = get_database_engine()
+
+    if engine is None:
+        return False
+
+    return inspect(engine).has_table(
+        DB_TABLE,
+        schema=DB_SCHEMA,
+    )
+
+
+def database_columns() -> list[str]:
+    """Return the PostgreSQL sales table's column names."""
+    engine = get_database_engine()
+
+    if engine is None:
+        return []
+
+    inspector = inspect(engine)
+
+    if not inspector.has_table(DB_TABLE, schema=DB_SCHEMA):
+        return []
+
+    return [
+        column["name"]
+        for column in inspector.get_columns(
+            DB_TABLE,
+            schema=DB_SCHEMA,
+        )
+    ]
+
+
+def quote_column(column_name: str) -> str:
+    """Safely quote a database column identifier."""
+    return '"' + column_name.replace('"', '""') + '"'
+
+
+def find_database_column(
+    columns: list[str],
+    candidates: list[str],
+) -> str | None:
+    """Find a database column using case-insensitive matching."""
+    def normalize(value: str) -> str:
+        return "".join(
+            character.lower()
+            for character in str(value)
+            if character.isalnum()
+        )
+
+    normalized_columns = {
+        normalize(column): column
+        for column in columns
+    }
+
+    for candidate in candidates:
+        match = normalized_columns.get(normalize(candidate))
+        if match is not None:
+            return match
+
+    return None
+
+
+def database_row_count() -> int:
+    """Count sales rows without downloading the dataset."""
+    engine = get_database_engine()
+
+    if engine is None:
+        raise RuntimeError("DATABASE_URL is not configured.")
+
+    query = text(
+        'SELECT COUNT(*) FROM "public"."feature_engineered_sales"'
+    )
+
+    with engine.connect() as connection:
+        return int(connection.execute(query).scalar_one())
+
+
+def database_preview(limit: int) -> dict[str, Any]:
+    """Fetch only a limited number of sales records."""
+    engine = get_database_engine()
+
+    if engine is None:
+        raise RuntimeError("DATABASE_URL is not configured.")
+
+    count_query = text(
+        'SELECT COUNT(*) FROM "public"."feature_engineered_sales"'
+    )
+    preview_query = text(
+        'SELECT * FROM "public"."feature_engineered_sales" LIMIT :limit'
+    )
+
+    with engine.connect() as connection:
+        total_rows = int(
+            connection.execute(count_query).scalar_one()
+        )
+
+        result = connection.execute(
+            preview_query,
+            {"limit": limit},
+        )
+
+        columns = list(result.keys())
+        rows = result.mappings().all()
+
+    records = [
+        {
+            str(column): clean_value(value)
+            for column, value in row.items()
+        }
+        for row in rows
+    ]
+
+    return {
+        "dataset": DB_TABLE,
+        "source": "postgresql",
+        "rows_in_file": total_rows,
+	"rows_in_dataset": total_rows,
+        "column_count": len(columns),
+        "columns": columns,
+        "preview_limit": limit,
+        "data": records,
+    }
+
+
+def database_analytics_summary() -> dict[str, Any]:
+    """Calculate the sales KPIs inside PostgreSQL."""
+    engine = get_database_engine()
+
+    if engine is None:
+        raise RuntimeError("DATABASE_URL is not configured.")
+
+    columns = database_columns()
+
+    if not columns:
+        raise RuntimeError(
+            f"Table {DB_SCHEMA}.{DB_TABLE} was not found."
+        )
+
+    revenue_column = find_database_column(
+        columns,
+        ["Revenue", "TotalRevenue", "Sales", "Amount"],
+    )
+    quantity_column = find_database_column(
+        columns,
+        ["Quantity", "TotalQuantity"],
+    )
+    customer_column = find_database_column(
+        columns,
+        ["Customer_ID", "CustomerID", "Customer ID", "Customer"],
+    )
+    invoice_column = find_database_column(
+        columns,
+        ["Invoice", "InvoiceNo", "InvoiceID", "OrderID"],
+    )
+    product_column = find_database_column(
+        columns,
+        ["StockCode", "ProductID", "Product", "SKU"],
+    )
+
+    expressions = [
+        "COUNT(*) AS row_count",
+    ]
+
+    if revenue_column:
+        expressions.append(
+            f"SUM({quote_column(revenue_column)}) AS total_revenue"
+        )
+
+    if quantity_column:
+        expressions.append(
+            f"SUM({quote_column(quantity_column)}) AS total_quantity"
+        )
+
+    if customer_column:
+        expressions.append(
+            f"COUNT(DISTINCT {quote_column(customer_column)}) "
+            "AS unique_customers"
+        )
+
+    if invoice_column:
+        expressions.append(
+            f"COUNT(DISTINCT {quote_column(invoice_column)}) "
+            "AS unique_invoices"
+        )
+
+    if product_column:
+        expressions.append(
+            f"COUNT(DISTINCT {quote_column(product_column)}) "
+            "AS unique_products"
+        )
+
+    query = text(
+        'SELECT '
+        + ", ".join(expressions)
+        + ' FROM "public"."feature_engineered_sales"'
+    )
+
+    with engine.connect() as connection:
+        result = connection.execute(query).mappings().one()
+
+    return {
+        "dataset_used": DB_TABLE,
+        "source": "postgresql",
+        "row_count": int(result["row_count"]),
+        "column_count": len(columns),
+        "total_revenue": (
+            float(result["total_revenue"])
+            if "total_revenue" in result
+            and result["total_revenue"] is not None
+            else None
+        ),
+        "total_quantity": (
+            float(result["total_quantity"])
+            if "total_quantity" in result
+            and result["total_quantity"] is not None
+            else None
+        ),
+        "unique_customers": (
+            int(result["unique_customers"])
+            if "unique_customers" in result
+            else None
+        ),
+        "unique_invoices": (
+            int(result["unique_invoices"])
+            if "unique_invoices" in result
+            else None
+        ),
+        "unique_products": (
+            int(result["unique_products"])
+            if "unique_products" in result
+            else None
+        ),
+    }
+
+
+# ============================================================
+# 3. LOCAL CSV HELPERS
 # ============================================================
 
 def available_csv_files() -> dict[str, Path]:
@@ -41,24 +326,27 @@ def available_csv_files() -> dict[str, Path]:
 
 
 def load_dataset(dataset_name: str) -> pd.DataFrame:
-    """Load a CSV using its filename stem, without a file extension."""
+    """Load a local CSV by its filename stem."""
     files = available_csv_files()
 
     if dataset_name not in files:
         raise HTTPException(
             status_code=404,
             detail=(
-                f"Dataset '{dataset_name}' was not found. "
+                f"Dataset '{dataset_name}' was not found locally. "
                 "Use GET /datasets to see available datasets."
             ),
         )
 
     try:
-        return pd.read_csv(files[dataset_name], low_memory=False)
+        return pd.read_csv(
+            files[dataset_name],
+            low_memory=False,
+        )
     except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail=f"Could not read dataset '{dataset_name}': {exc}",
+            detail=f"Could not read dataset '{dataset_name}'.",
         ) from exc
 
 
@@ -79,7 +367,7 @@ def clean_value(value: Any) -> Any:
         except (ValueError, TypeError):
             pass
 
-    if isinstance(value, (pd.Timestamp,)):
+    if isinstance(value, pd.Timestamp):
         return value.isoformat()
 
     if isinstance(value, (str, int, float, bool)):
@@ -88,8 +376,10 @@ def clean_value(value: Any) -> Any:
     return str(value)
 
 
-def dataframe_records(df: pd.DataFrame) -> list[dict[str, Any]]:
-    """Convert a DataFrame into clean JSON records."""
+def dataframe_records(
+    df: pd.DataFrame,
+) -> list[dict[str, Any]]:
+    """Convert a DataFrame into JSON-compatible records."""
     return [
         {
             str(column): clean_value(value)
@@ -103,7 +393,7 @@ def find_column(
     df: pd.DataFrame,
     candidates: list[str],
 ) -> str | None:
-    """Find a column using case-insensitive alphanumeric matching."""
+    """Find a DataFrame column using case-insensitive matching."""
     def normalize(value: str) -> str:
         return "".join(
             character.lower()
@@ -111,7 +401,10 @@ def find_column(
             if character.isalnum()
         )
 
-    columns = {normalize(column): column for column in df.columns}
+    columns = {
+        normalize(column): column
+        for column in df.columns
+    }
 
     for candidate in candidates:
         match = columns.get(normalize(candidate))
@@ -130,7 +423,10 @@ def numeric_sum(
     if column is None:
         return None
 
-    values = pd.to_numeric(df[column], errors="coerce").dropna()
+    values = pd.to_numeric(
+        df[column],
+        errors="coerce",
+    ).dropna()
 
     if values.empty:
         return None
@@ -138,25 +434,8 @@ def numeric_sum(
     return float(values.sum())
 
 
-def numeric_mean(
-    df: pd.DataFrame,
-    candidates: list[str],
-) -> float | None:
-    column = find_column(df, candidates)
-
-    if column is None:
-        return None
-
-    values = pd.to_numeric(df[column], errors="coerce").dropna()
-
-    if values.empty:
-        return None
-
-    return float(values.mean())
-
-
 # ============================================================
-# 3. ROOT ENDPOINT
+# 4. ROOT ENDPOINT
 # ============================================================
 
 @app.get("/", tags=["General"])
@@ -164,7 +443,7 @@ def root():
     return {
         "project": "RetailPulse",
         "message": "RetailPulse API is running.",
-        "version": "1.0.0",
+        "version": app.version,
         "documentation": "/docs",
         "health_check": "/health",
         "available_datasets": "/datasets",
@@ -172,39 +451,91 @@ def root():
 
 
 # ============================================================
-# 4. HEALTH CHECK
+# 5. HEALTH CHECK
 # ============================================================
 
 @app.get("/health", tags=["General"])
 def health_check():
     files = available_csv_files()
+    db_configured = bool(
+        os.getenv("DATABASE_URL", "").strip()
+    )
+
+    db_status = "not_configured"
+
+    if db_configured:
+        try:
+            engine = get_database_engine()
+
+            if engine is not None:
+                with engine.connect() as connection:
+                    connection.execute(text("SELECT 1"))
+
+                db_status = (
+                    "connected"
+                    if database_table_exists()
+                    else "connected_table_missing"
+                )
+        except Exception:
+            db_status = "unavailable"
+
+    database_healthy = db_status in {
+        "connected",
+        "not_configured",
+    }
 
     return {
-        "status": "healthy" if DATA_DIR.exists() else "warning",
+        "status": (
+            "healthy"
+            if database_healthy
+            else "degraded"
+        ),
         "project_directory_exists": PROJECT_DIR.exists(),
         "processed_data_directory_exists": DATA_DIR.exists(),
         "available_csv_count": len(files),
-        "data_directory": str(DATA_DIR),
+        "database_configured": db_configured,
+        "database_status": db_status,
+        "database_table": f"{DB_SCHEMA}.{DB_TABLE}",
     }
 
 
 # ============================================================
-# 5. LIST ALL AVAILABLE DATASETS
+# 6. LIST AVAILABLE DATASETS
 # ============================================================
 
 @app.get("/datasets", tags=["Datasets"])
 def list_datasets():
     files = available_csv_files()
-
     datasets = []
 
     for name, path in sorted(files.items()):
         datasets.append({
             "name": name,
+            "source": "csv",
             "filename": path.name,
             "size_bytes": path.stat().st_size,
             "preview_endpoint": f"/datasets/{name}",
         })
+
+    # Include the hosted database dataset if it is available.
+    try:
+        if database_table_exists():
+            columns = database_columns()
+            datasets = [
+                item for item in datasets
+                if item["name"] != DB_TABLE
+            ]
+            datasets.append({
+                "name": DB_TABLE,
+                "source": "postgresql",
+                "rows": database_row_count(),
+                "column_count": len(columns),
+                "columns": columns,
+                "preview_endpoint": f"/datasets/{DB_TABLE}",
+            })
+    except SQLAlchemyError:
+        # Keep CSV datasets available if PostgreSQL is temporarily down.
+        pass
 
     return {
         "count": len(datasets),
@@ -213,7 +544,7 @@ def list_datasets():
 
 
 # ============================================================
-# 6. PREVIEW A DATASET
+# 7. PREVIEW A DATASET
 # ============================================================
 
 @app.get("/datasets/{dataset_name}", tags=["Datasets"])
@@ -221,11 +552,25 @@ def dataset_preview(
     dataset_name: str,
     limit: int = Query(default=20, ge=1, le=500),
 ):
+    # Use PostgreSQL for the migrated sales dataset.
+    if dataset_name == DB_TABLE:
+        try:
+            if database_table_exists():
+                return database_preview(limit)
+        except SQLAlchemyError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="The PostgreSQL dataset is temporarily unavailable.",
+            ) from exc
+
+    # Other datasets continue to use local CSV files.
     df = load_dataset(dataset_name)
 
     return {
         "dataset": dataset_name,
+        "source": "csv",
         "rows_in_file": len(df),
+	"rows_in_dataset": len(df),
         "column_count": len(df.columns),
         "columns": [str(column) for column in df.columns],
         "preview_limit": limit,
@@ -234,12 +579,23 @@ def dataset_preview(
 
 
 # ============================================================
-# 7. SALES ANALYTICS SUMMARY
+# 8. SALES ANALYTICS SUMMARY
 # ============================================================
 
 @app.get("/analytics/summary", tags=["Analytics"])
 def analytics_summary():
-    # Prefer the feature-engineered dataset; fall back to sales data.
+    # Prefer PostgreSQL for the main sales dataset.
+    try:
+        if database_table_exists():
+            return database_analytics_summary()
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="PostgreSQL analytics are temporarily unavailable.",
+        ) from exc
+
+    # Fallback to a local CSV during development.
+    files = available_csv_files()
     selected_name = None
     df = None
 
@@ -248,7 +604,7 @@ def analytics_summary():
         "retail_sales",
         "retail_clean",
     ]:
-        if candidate in available_csv_files():
+        if candidate in files:
             df = load_dataset(candidate)
             selected_name = candidate
             break
@@ -256,28 +612,37 @@ def analytics_summary():
     if df is None:
         raise HTTPException(
             status_code=404,
-            detail="No recognized sales dataset was found.",
+            detail=(
+                "No recognized sales dataset was found in PostgreSQL "
+                "or the local processed-data folder."
+            ),
         )
 
     customer_column = find_column(
-        df, ["CustomerID", "Customer ID", "Customer"]
+        df,
+        ["CustomerID", "Customer_ID", "Customer ID", "Customer"],
     )
     invoice_column = find_column(
-        df, ["InvoiceNo", "Invoice", "InvoiceID", "OrderID"]
+        df,
+        ["InvoiceNo", "Invoice", "InvoiceID", "OrderID"],
     )
     product_column = find_column(
-        df, ["StockCode", "ProductID", "Product", "SKU"]
+        df,
+        ["StockCode", "ProductID", "Product", "SKU"],
     )
 
     return {
         "dataset_used": selected_name,
+        "source": "csv",
         "row_count": len(df),
         "column_count": len(df.columns),
         "total_revenue": numeric_sum(
-            df, ["Revenue", "TotalRevenue", "Sales", "Amount"]
+            df,
+            ["Revenue", "TotalRevenue", "Sales", "Amount"],
         ),
         "total_quantity": numeric_sum(
-            df, ["Quantity", "TotalQuantity"]
+            df,
+            ["Quantity", "TotalQuantity"],
         ),
         "unique_customers": (
             int(df[customer_column].nunique())
@@ -295,7 +660,7 @@ def analytics_summary():
 
 
 # ============================================================
-# 8. REVENUE FORECAST
+# 9. REVENUE FORECAST
 # ============================================================
 
 @app.get("/forecast/revenue", tags=["Forecasting"])
@@ -304,7 +669,6 @@ def revenue_forecast(
 ):
     files = available_csv_files()
 
-    # Prefer the 90-day LSTM forecast if available.
     candidates = [
         "lstm_revenue_forecast_90_days",
         "revenue_forecast_90_days",
@@ -326,6 +690,7 @@ def revenue_forecast(
 
     return {
         "dataset_used": selected_name,
+        "source": "csv",
         "rows_available": len(df),
         "columns": [str(column) for column in df.columns],
         "forecast": dataframe_records(df.head(limit)),
@@ -333,7 +698,7 @@ def revenue_forecast(
 
 
 # ============================================================
-# 9. INVENTORY PRIORITY PRODUCTS
+# 10. INVENTORY PRIORITY PRODUCTS
 # ============================================================
 
 @app.get("/inventory/priority", tags=["Inventory"])
@@ -362,6 +727,7 @@ def inventory_priority(
 
     return {
         "dataset_used": selected_name,
+        "source": "csv",
         "rows_available": len(df),
         "columns": [str(column) for column in df.columns],
         "products": dataframe_records(df.head(limit)),
@@ -369,7 +735,7 @@ def inventory_priority(
 
 
 # ============================================================
-# 10. CHURN PREDICTIONS
+# 11. CHURN PREDICTIONS
 # ============================================================
 
 @app.get("/analytics/churn", tags=["Analytics"])
@@ -388,6 +754,7 @@ def churn_predictions(
 
     return {
         "dataset_used": dataset_name,
+        "source": "csv",
         "rows_available": len(df),
         "columns": [str(column) for column in df.columns],
         "predictions": dataframe_records(df.head(limit)),
@@ -395,7 +762,7 @@ def churn_predictions(
 
 
 # ============================================================
-# 11. RFM CUSTOMER SEGMENTS
+# 12. RFM CUSTOMER SEGMENTS
 # ============================================================
 
 @app.get("/analytics/rfm", tags=["Analytics"])
@@ -414,6 +781,7 @@ def rfm_segments(
 
     return {
         "dataset_used": dataset_name,
+        "source": "csv",
         "rows_available": len(df),
         "columns": [str(column) for column in df.columns],
         "segments": dataframe_records(df.head(limit)),
@@ -421,7 +789,7 @@ def rfm_segments(
 
 
 # ============================================================
-# 12. PRODUCT ABC ANALYSIS
+# 13. PRODUCT ABC ANALYSIS
 # ============================================================
 
 @app.get("/analytics/abc-products", tags=["Analytics"])
@@ -440,6 +808,7 @@ def abc_product_analysis(
 
     return {
         "dataset_used": dataset_name,
+        "source": "csv",
         "rows_available": len(df),
         "columns": [str(column) for column in df.columns],
         "products": dataframe_records(df.head(limit)),
