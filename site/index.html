@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RetailPulse — Customer Analytics &amp; Demand Forecasting</title>
+  <meta name="description" content="AI-powered customer analytics and demand forecasting on the Online Retail II dataset.">
+  <style>
+    :root { --bg:#f7f6f2; --ink:#1c1f24; --muted:#5d636d; --line:#dcd9d0; --card:#fff; --accent:#0f5c4d; }
+    * { box-sizing:border-box; }
+    body { margin:0; font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--ink); }
+    header, main, footer { max-width:1100px; margin:0 auto; padding:0 24px; }
+    header { padding-top:56px; padding-bottom:32px; border-bottom:1px solid var(--line); }
+    h1 { font-size:2.4rem; margin:0 0 8px; letter-spacing:-0.02em; }
+    h2 { font-size:1.35rem; margin:48px 0 6px; }
+    p.lead { color:var(--muted); margin:0; max-width:60ch; }
+    .section-note { color:var(--muted); margin:0 0 18px; }
+    .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-top:28px; }
+    .kpi { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+    .kpi .label { font-size:.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+    .kpi .value { font-size:1.5rem; font-weight:650; font-variant-numeric:tabular-nums; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:16px; }
+    figure { margin:0; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; }
+    figure img { width:100%; height:auto; display:block; }
+    figcaption { font-size:.9rem; color:var(--muted); margin-top:8px; }
+    a { color:var(--accent); }
+    footer { padding-top:48px; padding-bottom:48px; color:var(--muted); font-size:.9rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>RetailPulse</h1>
+    <p class="lead">AI-powered customer analytics and demand forecasting on the Online Retail II dataset (UCI). Covers sales analytics, RFM segmentation, churn prediction, revenue forecasting and inventory optimization.</p>
+    <div class="kpis">
+      <div class="kpi"><div class="label">Transactions analysed</div><div class="value">779,425</div></div>
+      <div class="kpi"><div class="label">Expected 90-day revenue</div><div class="value">£2.13M</div></div>
+      <div class="kpi"><div class="label">Forecast MAE vs baseline</div><div class="value">−43%</div></div>
+      <div class="kpi"><div class="label">Churn ROC AUC</div><div class="value">0.813</div></div>
+      <div class="kpi"><div class="label">Critical-risk products</div><div class="value">350 / 4,633</div></div>
+    </div>
+  </header>
+
+  <main>
+    <h2>Sales analytics</h2>
+    <p class="section-note">Revenue trends, top products, countries and customers.</p>
+    <div class="grid">
+      <figure><img src="reports/figures/eda_monthly_revenue.png" alt="Monthly revenue" loading="lazy"><figcaption>Monthly revenue</figcaption></figure>
+      <figure><img src="reports/figures/eda_daily_revenue.png" alt="Daily revenue" loading="lazy"><figcaption>Daily revenue</figcaption></figure>
+      <figure><img src="reports/figures/eda_top_products.png" alt="Top products" loading="lazy"><figcaption>Top products</figcaption></figure>
+      <figure><img src="reports/figures/eda_top_countries.png" alt="Top countries" loading="lazy"><figcaption>Top countries</figcaption></figure>
+      <figure><img src="reports/figures/eda_top_customers.png" alt="Top customers" loading="lazy"><figcaption>Top customers</figcaption></figure>
+      <figure><img src="reports/figures/eda_cancellation_distribution.png" alt="Cancellation distribution" loading="lazy"><figcaption>Cancellations</figcaption></figure>
+    </div>
+
+    <h2>Customer segmentation</h2>
+    <p class="section-note">RFM scoring and clustering of customers.</p>
+    <div class="grid">
+      <figure><img src="reports/figures/rfm_distribution.png" alt="RFM distribution" loading="lazy"><figcaption>RFM distribution</figcaption></figure>
+      <figure><img src="reports/figures/customer_segments.png" alt="Customer segments" loading="lazy"><figcaption>Customer segments</figcaption></figure>
+      <figure><img src="reports/figures/customer_clusters.png" alt="Customer clusters" loading="lazy"><figcaption>Customer clusters</figcaption></figure>
+    </div>
+
+    <h2>Churn prediction</h2>
+    <p class="section-note">Random Forest: accuracy 75.2%, precision 77.4%, recall 79.4%, F1 0.784, ROC AUC 0.813. A customer counts as churned if they make no purchase in the final 90 days.</p>
+    <div class="grid">
+      <figure><img src="reports/figures/churn_roc_curve.png" alt="Churn ROC curve" loading="lazy"><figcaption>ROC curve</figcaption></figure>
+      <figure><img src="reports/figures/churn_feature_importance.png" alt="Churn feature importance" loading="lazy"><figcaption>Feature importance</figcaption></figure>
+      <figure><img src="reports/figures/churn_risk_distribution.png" alt="Churn risk distribution" loading="lazy"><figcaption>Churn risk distribution</figcaption></figure>
+      <figure><img src="reports/figures/churn_distribution.png" alt="Churn distribution" loading="lazy"><figcaption>Churn distribution</figcaption></figure>
+      <figure><img src="reports/figures/random_forest_churn_confusion_matrix.png" alt="Random Forest confusion matrix" loading="lazy"><figcaption>Random Forest confusion matrix</figcaption></figure>
+      <figure><img src="reports/figures/logistic_churn_confusion_matrix.png" alt="Logistic regression confusion matrix" loading="lazy"><figcaption>Logistic regression confusion matrix</figcaption></figure>
+    </div>
+
+    <h2>Demand forecasting</h2>
+    <p class="section-note">Prophet daily revenue model: MAE £12.9k vs £22.7k baseline, MAPE 29.7%, 90-day horizon.</p>
+    <div class="grid">
+      <figure><img src="reports/figures/90_day_revenue_forecast.png" alt="90-day revenue forecast" loading="lazy"><figcaption>90-day revenue forecast</figcaption></figure>
+      <figure><img src="reports/figures/forecast_evaluation.png" alt="Forecast evaluation" loading="lazy"><figcaption>Forecast vs actuals</figcaption></figure>
+    </div>
+
+    <h2>Inventory optimization</h2>
+    <p class="section-note">7-day lead time, 95% service level (z = 1.65). 1,310 high-risk products; average risk score 48.6.</p>
+    <div class="grid">
+      <figure><img src="reports/figures/inventory_risk_distribution.png" alt="Inventory risk distribution" loading="lazy"><figcaption>Inventory risk distribution</figcaption></figure>
+      <figure><img src="reports/figures/top_20_inventory_risk_products.png" alt="Top 20 inventory risk products" loading="lazy"><figcaption>Top 20 at-risk products</figcaption></figure>
+      <figure><img src="reports/figures/abc_product_distribution.png" alt="ABC product distribution" loading="lazy"><figcaption>ABC classification</figcaption></figure>
+      <figure><img src="reports/figures/revenue_vs_inventory_risk.png" alt="Revenue vs inventory risk" loading="lazy"><figcaption>Revenue vs inventory risk</figcaption></figure>
+      <figure><img src="reports/figures/demand_variability_distribution.png" alt="Demand variability" loading="lazy"><figcaption>Demand variability</figcaption></figure>
+      <figure><img src="reports/figures/top_safety_stock_products.png" alt="Top safety stock products" loading="lazy"><figcaption>Highest safety stock</figcaption></figure>
+      <figure><img src="reports/figures/top_reorder_point_products.png" alt="Top reorder point products" loading="lazy"><figcaption>Highest reorder points</figcaption></figure>
+    </div>
+  </main>
+
+  <footer>
+    Source code, notebooks, Streamlit dashboard and FastAPI service:
+    <a href="https://github.com/Iamdeva7250/RetailPulse">github.com/Iamdeva7250/RetailPulse</a>
+  </footer>
+</body>
+</html>

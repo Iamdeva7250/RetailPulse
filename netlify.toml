@@ -1,0 +1,5 @@
+# RetailPulse is a Python analytics project (not a Hugo site). Netlify serves a
+# static report page built from the committed figures and metrics in reports/.
+[build]
+  command = "rm -rf public && mkdir -p public && cp -r site/. public/ && cp -r reports public/reports"
+  publish = "public"
