@@ -46,3 +46,6 @@ data/retailpulse.db
 # Temporary dashboard backups and unused variant
 dashboard/*.bak
 dashboard/app_new.py
+
+# Netlify static build output
+public/
