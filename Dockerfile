@@ -16,6 +16,7 @@ COPY api/ ./api/
 COPY dashboard/ ./dashboard/
 COPY src/ ./src/
 COPY scripts/ ./scripts/
+COPY data/processed/ ./data/processed/
 COPY config.yaml .
 COPY README.md .
 
