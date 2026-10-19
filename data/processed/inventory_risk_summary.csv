@@ -1,0 +1,5 @@
+InventoryRiskCategory,Products,AverageRiskScore,AverageDailyDemand,TotalRevenue
+Critical,628,86.52,15.1,10554367.85
+High,681,58.73,3.56,3590737.44
+Low,2205,16.65,0.26,982995.55
+Moderate,1117,39.68,1.56,2246703.43
