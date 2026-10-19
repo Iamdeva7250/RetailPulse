@@ -1,4 +1,4 @@
-
+﻿
 import os
 import json
 import urllib.request
@@ -18,7 +18,7 @@ from sqlalchemy.engine import URL
 
 st.set_page_config(
     page_title="RetailPulse | Retail Analytics",
-    page_icon="ðŸ“Š",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -299,7 +299,7 @@ def show_table(df, title=None, max_rows=500):
         return
 
     st.caption(
-        f"{len(df):,} rows Ã— {len(df.columns):,} columns"
+        f"{len(df):,} rows × {len(df.columns):,} columns"
     )
     st.dataframe(
         df.head(max_rows),
@@ -484,26 +484,58 @@ with st.sidebar:
 
    
     st.markdown("---")
-    st.subheader("PostgreSQL Status")
+    st.subheader("Render API & PostgreSQL Status")
 
     try:
-        database_name, table_rows = check_postgres_connection()
+        api_health = get_live_api_json("/health")
 
-        st.success("PostgreSQL connected")
-        st.caption(f"Database: {database_name}")
-        st.metric("Database sales rows", f"{table_rows:,}")
+        if (
+            api_health.get("status") == "healthy"
+            and api_health.get("database_status") == "connected"
+        ):
+            st.success("Render API and PostgreSQL connected")
+            st.caption(
+                f"Database table: "
+                f"{api_health.get('database_table', 'Not reported')}"
+            )
+
+            try:
+                dataset_response = get_live_api_json("/datasets")
+                datasets = dataset_response.get("datasets", [])
+
+                sales_dataset = next(
+                    (
+                        item for item in datasets
+                        if item.get("name") == "feature_engineered_sales"
+                    ),
+                    None,
+                )
+
+                if sales_dataset:
+                    st.metric(
+                        "Database sales rows",
+                        f"{int(sales_dataset.get('rows', 0)):,}",
+                    )
+                else:
+                    st.info("Sales dataset was not listed by the API.")
+
+            except Exception as dataset_error:
+                st.caption(
+                    f"Dataset details unavailable: "
+                    f"{type(dataset_error).__name__}: {dataset_error}"
+                )
+        else:
+            st.warning("Render API or PostgreSQL needs attention.")
+            st.json(api_health)
 
     except Exception as exc:
-        st.warning(
-            "PostgreSQL connection unavailable. "
-            "CSV dashboard remains available."
-        )
-        st.caption(f"Diagnostic: {type(exc).__name__}: {exc}")
+        st.error("Could not reach the Render API.")
+        st.caption(f"{type(exc).__name__}: {exc}")
 
     st.markdown("---")
     st.caption(
-        "Dashboard charts currently read CSV files "
-        "from data/processed/."
+        "Overview and supported analytics use the deployed API. "
+        "CSV-based features require data/processed/ to be available."
     )
     st.caption("Power BI files are not modified.")
 
@@ -1635,6 +1667,6 @@ with tab_health:
 
 st.markdown("---")
 st.caption(
-    "RetailPulse | Customer Analytics â€¢ Churn Prediction â€¢ "
-    "Demand Forecasting â€¢ Inventory Optimization"
+    "RetailPulse | Customer Analytics • Churn Prediction • "
+    "Demand Forecasting • Inventory Optimization"
 )
