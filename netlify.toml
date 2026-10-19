@@ -1,0 +1,5 @@
+# RetailPulse is a Python project (Streamlit dashboard, FastAPI, notebooks),
+# not a Hugo site. Netlify only serves the static placeholder page in public/.
+[build]
+  command = "echo 'No build step required'"
+  publish = "public"
